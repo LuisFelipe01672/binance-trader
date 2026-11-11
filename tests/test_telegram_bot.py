@@ -24,6 +24,10 @@ class FakeTelegram:
         self.sent.append({"chat": chat, "text": text, "buttons": buttons, "id": self.next_id})
         return {"message_id": self.next_id}
 
+    def send_document(self, chat, filename, content, caption=""):
+        self.docs = getattr(self, "docs", []) + [(chat, filename, content, caption)]
+        return {"message_id": 1}
+
     def edit(self, chat, mid, text):
         self.edits.append((chat, mid, text))
 

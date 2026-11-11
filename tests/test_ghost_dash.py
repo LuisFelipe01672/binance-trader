@@ -120,6 +120,16 @@ class TestBotGhosts(BotBase):
         self.bot.tick()
         self.assertEqual(len(self.tg.sent), n + 1)
 
+    def test_export_sends_a_frozen_html_file(self):
+        self.pair()
+        self.msg("/exportar", uid=8)
+        chat, name, content, caption = self.tg.docs[-1]
+        self.assertEqual(chat, 555)
+        self.assertTrue(name.startswith("painel-2026-11-08") and name.endswith(".html"))
+        page = content.decode()
+        self.assertIn("Painel do bot", page)
+        self.assertNotIn('http-equiv="refresh"', page)
+
     def test_painel_command(self):
         self.pair()
         self.msg("/painel", uid=7)

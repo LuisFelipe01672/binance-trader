@@ -61,7 +61,7 @@ python3 binance-trader/scripts/telegram_bot.py run     # liga
 ```
 
 Na primeira vez, o terminal mostra um código. Envie `/start CODIGO` para o bot: só esse
-chat passa a poder aprovar. Comandos: `/status`, `/painel`, `/resumo`, `/scan`, `/clima`, `/diario`, `/pausar`, `/retomar`.
+chat passa a poder aprovar. Comandos: `/status`, `/painel`, `/exportar` (painel em arquivo, para abrir no PC ou encaminhar), `/resumo`, `/scan`, `/clima`, `/diario`, `/pausar`, `/retomar`.
 
 - **Painel:** com o bot ligado, abra `http://localhost:8765` no navegador do mesmo aparelho. Mostra resultados, curva, trades abertos, clima, moedas vigiadas e os trades fantasmas. É só leitura e só o próprio aparelho acessa.
 - **Trades fantasmas:** todo sinal é acompanhado como se tivesse sido feito, até os bloqueados e os que você recusou, para medir a estratégia sem arriscar nada.

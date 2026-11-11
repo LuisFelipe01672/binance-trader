@@ -73,6 +73,25 @@ class Telegram:
         return self.call("sendMessage", chat_id=chat, text=text[:4000], reply_markup=markup,
                          disable_web_page_preview="true")
 
+    def send_document(self, chat, filename, content, caption=""):
+        """Uploads a file (multipart/form-data)."""
+        import urllib.request
+        import uuid
+        b = uuid.uuid4().hex
+        parts = []
+        for k, v in (("chat_id", str(chat)), ("caption", caption[:1000])):
+            parts.append(('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b, k, v)).encode())
+        parts.append(('--%s\r\nContent-Disposition: form-data; name="document"; filename="%s"\r\n'
+                      'Content-Type: text/html\r\n\r\n' % (b, filename)).encode() + content + b"\r\n")
+        parts.append(("--%s--\r\n" % b).encode())
+        req = urllib.request.Request(TG_API % (self.token, "sendDocument"), data=b"".join(parts), method="POST",
+                                     headers={"Content-Type": "multipart/form-data; boundary=" + b, "User-Agent": c.UA})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            res = json.loads(r.read().decode())
+        if not res.get("ok"):
+            raise c.HttpError(0, "Telegram sendDocument: %s" % res)
+        return res["result"]
+
     def edit(self, chat, message_id, text):
         try:
             self.call("editMessageText", chat_id=chat, message_id=message_id, text=text[:4000])
@@ -178,6 +197,13 @@ class Bot:
         elif cmd in ("/painel", "painel"):
             self.say("Painel: http://localhost:%d\nAbra esse endereco no navegador DESTE celular "
                      "(o mesmo onde o Termux esta rodando)." % self.cfg["dashboard_port"])
+        elif cmd in ("/exportar", "exportar"):
+            now = self.clock()
+            page = dash.snapshot(dash.render(self.cfg, self.st, now)).encode("utf-8")
+            name = "painel-%s.html" % c.brt(now).strftime("%Y-%m-%d-%Hh%M")
+            self.tg.send_document(self.st["chat_id"], name, page,
+                                  "Painel de %s. Abra no PC ou encaminhe. E uma foto do momento: "
+                                  "nao se atualiza sozinho." % c.fmt_time(now))
         elif cmd in ("/resumo", "resumo"):
             self.say(dash.summary_text(self.cfg, self.clock()))
         elif cmd in ("/clima", "clima"):
@@ -487,7 +513,7 @@ class Bot:
 
 
 HELP = ("Comandos:\n/status trades abertos e resultado\n/painel link do painel\n/resumo resumo do dia\n"
-        "/scan procurar agora\n/clima clima do mercado\n"
+        "/exportar painel em arquivo (para abrir no PC)\n/scan procurar agora\n/clima clima do mercado\n"
         "/diario ultimos trades\n/pausar parar de procurar\n/retomar voltar a procurar\n\n"
         "Eu procuro sozinho a cada vela e te mando quando algo passar em todos os filtros. "
         "Ferramenta educacional, nao e recomendacao de investimento.")

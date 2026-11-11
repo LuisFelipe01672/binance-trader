@@ -175,6 +175,12 @@ def render(cfg, bot_state, now=None, price=None):
     return PAGE.replace("{{BODY}}", "\n".join(parts))
 
 
+def snapshot(page):
+    """A copy to open elsewhere: no auto refresh (it would only reload the same frozen file)."""
+    return page.replace('<meta http-equiv="refresh" content="60">', "").replace(
+        "A pagina se atualiza sozinha a cada minuto.", "Foto do momento: nao se atualiza.")
+
+
 PAGE = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="60">
 <title>Painel do bot</title><style>
