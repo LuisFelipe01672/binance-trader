@@ -1,0 +1,19 @@
+{
+  "_leia": "Config do bot para a TESTNET (dinheiro de mentira). Na testnet os pares sao em USDT.",
+  "env": "testnet",
+  "quote": "USDT",
+  "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP"],
+  "min_volume_24h": 0,
+  "budget": 1000,
+  "max_loss_per_trade": 10,
+  "daily_loss_limit": 30,
+  "weekly_loss_limit": 60,
+  "max_trades_per_day": 3,
+  "max_position_pct": 50,
+  "min_reward_risk": 1.2,
+  "max_hold_hours": 12,
+  "entry_timeout_min": 60,
+  "bot_interval": "15m",
+  "bot_skip_no_edge": true,
+  "allow_live": false
+}

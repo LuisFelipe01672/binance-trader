@@ -1,0 +1,7 @@
+{
+  "name": "binance-trader",
+  "description": "Day trade de cripto na Binance (pares em BRL) com scanner, maquina do tempo, risco e ordens OTOCO so depois do seu sim. Testnet por padrao.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "skills": "./"
+}
