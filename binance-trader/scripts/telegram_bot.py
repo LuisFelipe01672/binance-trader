@@ -463,12 +463,49 @@ def ensure_config():
         print("Config criada em %s (testnet, USDT). Ajuste os limites se quiser." % p)
 
 
+BINANCE_ERRORS = {
+    -1022: "assinatura invalida: a Secret Key esta errada (copiada incompleta, com espaco, ou e a API Key no lugar).",
+    -2014: "API Key em formato invalido: copie a API Key de novo, inteira.",
+    -2015: "API Key nao reconhecida: confira se e uma chave da TESTNET (testnet.binance.vision), "
+           "e nao da Binance de verdade, e se nao foi apagada.",
+    -1021: "relogio do celular fora de hora: ative data e hora automaticas nas configuracoes.",
+    -2008: "API Key nao existe nesta conta: gere uma nova na testnet.",
+}
+
+
+def explain(e):
+    try:
+        body = json.loads(e.body)
+        code = body.get("code")
+        return "%s (codigo %s: %s)" % (BINANCE_ERRORS.get(code, "erro da Binance"), code, body.get("msg"))
+    except (ValueError, AttributeError):
+        return "HTTP %s %s" % (e.status, (e.body or "(sem detalhes)")[:200])
+
+
+def account(cfg, http=None):
+    try:
+        return broker.signed("GET", cfg["env"], "/api/v3/account", {"omitZeroBalances": "true"}, http=http)
+    except c.HttpError as e:
+        if '"code":-11' in (e.body or "").replace(" ", ""):        # older servers: parameter not known
+            return broker.signed("GET", cfg["env"], "/api/v3/account", {}, http=http)
+        raise
+
+
+def clean(v):
+    return "".join(v.split())          # pasted keys sometimes carry spaces or line breaks
+
+
 def cmd_setup():
     print("Configuracao do bot. Nada do que voce digitar aparece na tela nem sai deste aparelho.\n")
     vals = {}
-    vals["TELEGRAM_BOT_TOKEN"] = getpass.getpass("Token do bot (do @BotFather): ").strip()
-    vals["BINANCE_API_KEY"] = getpass.getpass("API Key da Binance (testnet): ").strip()
-    vals["BINANCE_SECRET_KEY"] = getpass.getpass("Secret Key da Binance (testnet): ").strip()
+    load_secrets()
+    keep = lambda k, v: v or os.environ.get(k, "")
+    print("(Enter vazio mantem o que ja estava salvo.)")
+    vals["TELEGRAM_BOT_TOKEN"] = keep("TELEGRAM_BOT_TOKEN", clean(getpass.getpass("Token do bot (do @BotFather): ")))
+    vals["BINANCE_API_KEY"] = keep("BINANCE_API_KEY", clean(getpass.getpass("API Key da Binance (testnet): ")))
+    vals["BINANCE_SECRET_KEY"] = keep("BINANCE_SECRET_KEY", clean(getpass.getpass("Secret Key da Binance (testnet): ")))
+    for k in SECRET_KEYS:
+        os.environ[k] = vals[k]
     save_secrets(vals)
     print("\nSalvo em %s (so voce le)." % SECRETS)
     ensure_config()
@@ -488,14 +525,20 @@ def cmd_check():
             print("Telegram OK: @%s" % me["username"])
         except c.HttpError as e:
             print("Telegram FALHOU: %s" % e)
+    k = os.environ.get("BINANCE_API_KEY", "")
+    sk = os.environ.get("BINANCE_SECRET_KEY", "")
+    print("Chaves: API Key com %d caracteres, Secret Key com %d (o normal e 64 cada)%s" % (
+        len(k), len(sk), "  <- IGUAIS: voce colou a mesma nas duas" if k and k == sk else ""))
     try:
-        acct = broker.signed("GET", cfg["env"], "/api/v3/account", {"omitZeroBalances": "true"})
+        acct = account(cfg)
         bal = {b["asset"]: float(b["free"]) for b in acct.get("balances", [])}
         print("Binance OK. Saldo %s: %s" % (cfg["quote"], bal.get(cfg["quote"], 0)))
-        if acct.get("canWithdraw"):
+        if acct.get("canWithdraw") and cfg["env"] == "prod":
             print("ATENCAO: esta chave pode SACAR. Crie uma chave sem permissao de saque.")
-    except (c.HttpError, SystemExit) as e:
-        print("Binance FALHOU: %s" % getattr(e, "code", e))
+    except c.HttpError as e:
+        print("Binance FALHOU: %s" % explain(e))
+    except SystemExit as e:
+        print("Binance FALHOU: %s" % e.code)
     try:
         print("Preco BTC%s: %s" % (cfg["quote"], data.price("BTC" + cfg["quote"])))
     except c.HttpError as e:
