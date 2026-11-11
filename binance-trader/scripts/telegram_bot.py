@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import bt  # noqa: E402
-from btlib import broker, common as c, data, journal as J, size  # noqa: E402
+from btlib import broker, common as c, dash, data, ghost as G, journal as J, size  # noqa: E402
 
 SECRETS = os.path.expanduser(os.environ.get("BT_SECRETS", "~/.binance-trader/secrets.env"))
 TG_API = "https://api.telegram.org/bot%s/%s"
@@ -175,6 +175,11 @@ class Bot:
         elif cmd in ("/retomar", "retomar"):
             self.st["paused"] = False
             self.say("Retomado. Procuro a cada vela de %s." % self.cfg["bot_interval"])
+        elif cmd in ("/painel", "painel"):
+            self.say("Painel: http://localhost:%d\nAbra esse endereco no navegador DESTE celular "
+                     "(o mesmo onde o Termux esta rodando)." % self.cfg["dashboard_port"])
+        elif cmd in ("/resumo", "resumo"):
+            self.say(dash.summary_text(self.cfg, self.clock()))
         elif cmd in ("/clima", "clima"):
             ok, out = self.cli("regime", "--write")
             self.say(out)
@@ -197,12 +202,8 @@ class Bot:
 
     # -------------------------------------------------- proposals
     def scan_and_propose(self, force=False):
-        if self.st["paused"] and not force:
-            return
-        if self.live_pending():
-            if force:
-                self.say("Ja tem uma proposta esperando a sua resposta.")
-            return
+        """Scans; every fresh signal becomes a ghost; the first one that passes everything is proposed.
+        Paused or with a proposal already waiting, signals are still followed as ghosts."""
         ok, out = self.cli("scan", "--interval", self.cfg["bot_interval"])
         if not ok:
             self.log("scan falhou: " + out)
@@ -210,42 +211,66 @@ class Bot:
                 self.say("Nao consegui procurar: " + out[-500:])
             return
         hits = [h for h in (c.read_json(c.path("scan.json"), {}) or {}).get("hits", []) if h["bars_ago"] == 0]
-        skipped = []
+        waiting = self.live_pending()
+        proposed, skipped = False, []
         for h in hits:
-            res = self.evaluate(h["symbol"], h["setup"])
-            if res is True:
-                return
-            skipped.append("%s %s: %s" % (h["symbol"], h["setup"], res))
-        if force:
-            self.say("Nenhum trade passou nos filtros agora." + ("\n\nVistos e descartados:\n- " + "\n- ".join(skipped) if skipped else ""))
+            if self.st["paused"] and not force:
+                self.ghost_only(h, "pausado", "bot pausado")
+            elif waiting or proposed:
+                self.ghost_only(h, "nao avaliado", "ja havia uma proposta esperando")
+            else:
+                res = self.evaluate(h["symbol"], h["setup"])
+                if res is True:
+                    proposed = True
+                else:
+                    skipped.append("%s %s: %s" % (h["symbol"], h["setup"], res))
+        if force and not proposed:
+            if waiting:
+                self.say("Ja tem uma proposta esperando a sua resposta.")
+            else:
+                self.say("Nenhum trade passou nos filtros agora." + (
+                    "\n\nVistos e descartados:\n- " + "\n- ".join(skipped) if skipped else ""))
         elif skipped:
             self.log("descartados: " + "; ".join(skipped))
+
+    def ghost_only(self, h, decision, reason):
+        path = c.path("plan-ghost.json")
+        ok, out = self.cli("plan", "--symbol", h["symbol"], "--setup", h["setup"],
+                           "--interval", self.cfg["bot_interval"], "--write", path)
+        if ok:
+            G.record(c.read_json(path), decision, reason, self.cfg, self.clock())
 
     def evaluate(self, symbol, setup):
         """plan -> sim -> size -> risk. Proposes and returns True, or returns why not."""
         ok, out = self.cli("plan", "--symbol", symbol, "--setup", setup, "--interval", self.cfg["bot_interval"])
         if not ok:
             return "plano: " + out.splitlines()[-1]
+        gk = G.record(c.read_json(c.path("plan.json")), "avaliando", None, self.cfg, self.clock())
+
+        def no(decision, why):
+            G.set_decision(gk, decision, why)
+            return why
         ok, sim_out = self.cli("sim", "--write")
         if not ok:
-            return "simulacao: " + sim_out.splitlines()[-1]
+            return no("erro", "simulacao: " + sim_out.splitlines()[-1])
         sim = c.read_json(c.path("sim.json"), {}) or {}
         if self.cfg["bot_skip_no_edge"] and sim.get("verdict", "").startswith("SEM VANTAGEM"):
-            return "simulacao sem vantagem"
+            return no("sem vantagem", "simulacao sem vantagem")
         ok, out = self.cli("size")
         orders = (c.read_json(c.path("orders.json"), {}) or {}).get("orders", [])
         if not ok or not orders:
-            return "tamanho: " + (out.splitlines()[-1] if out else "sem ordem")
+            return no("bloqueado", "tamanho: " + (out.splitlines()[-1] if out else "sem ordem"))
         ok, risk_out = self.cli("risk")
         o = orders[0]
         r = (c.read_json(c.path("state", "risk.json"), {}) or {}).get(o["fingerprint"], {})
         if r.get("status") != "PASS":
-            return "risco: " + "; ".join(r.get("reasons", [])) if r else "risco: sem resposta"
+            return no("bloqueado", "; ".join(r.get("reasons", [])) if r else "risco sem resposta")
         warns = [l.strip()[7:] for l in risk_out.splitlines() if l.strip().startswith("aviso:")]
-        self.propose(o, sim, warns)
+        G.set_decision(gk, "proposto", None)
+        self.propose(o, sim, warns, gk)
         return True
 
-    def propose(self, o, sim, warns):
+    def propose(self, o, sim, warns, ghost_key=None):
         q = o["quote"]
         b, h = sim.get("bootstrap", {}), sim.get("history", {})
         lines = [
@@ -268,7 +293,7 @@ class Bot:
         msg = self.say("\n".join(lines), [[("✅ Aprovar e enviar", "ok:" + o["fingerprint"]),
                                            ("❌ Recusar", "no:" + o["fingerprint"])]])
         self.st["pending"][o["fingerprint"]] = {"time": c.ms(self.clock()), "message_id": msg["message_id"] if msg else None,
-                                                 "symbol": o["symbol"], "text": "\n".join(lines)}
+                                                 "symbol": o["symbol"], "text": "\n".join(lines), "ghost": ghost_key}
         self.save()
 
     def live_pending(self):
@@ -276,6 +301,8 @@ class Bot:
         for fp, p in list(self.st["pending"].items()):
             if (now - p["time"]) / 60000 > self.cfg["approval_minutes"]:
                 del self.st["pending"][fp]
+                if p.get("ghost"):
+                    G.set_decision(p["ghost"], "expirou")
                 if p.get("message_id"):
                     self.tg.edit(self.st["chat_id"], p["message_id"], p["text"] + "\n\nEXPIROU: nada foi enviado.")
         self.save()
@@ -287,12 +314,16 @@ class Bot:
         if not p:
             self.tg.answer(cb_id, "Essa proposta ja expirou ou foi respondida.")
             return
+        if p.get("ghost"):
+            G.set_decision(p["ghost"], "recusado" if action == "no" else "aprovado")
         if action == "no":
             self.tg.answer(cb_id, "Recusado.")
             self.tg.edit(self.st["chat_id"], msg_id, p["text"] + "\n\nRECUSADO por voce. Nada foi enviado.")
             return
         now = self.clock()
         if (c.ms(now) - p["time"]) / 60000 > self.cfg["approval_minutes"]:
+            if p.get("ghost"):
+                G.set_decision(p["ghost"], "expirou")
             self.tg.answer(cb_id, "Expirou.")
             self.tg.edit(self.st["chat_id"], msg_id, p["text"] + "\n\nEXPIROU: nada foi enviado.")
             return
@@ -426,6 +457,14 @@ class Bot:
             if now - self.st["last_monitor"] >= 60000:
                 self.st["last_monitor"] = now
                 self.monitor()
+            if now - self.st.get("last_ghosts", 0) >= 300000:
+                self.st["last_ghosts"] = now
+                G.update_all(self.clock())
+            h = self.cfg.get("daily_summary_hour", 21)
+            local = c.brt(self.clock())
+            if h >= 0 and local.hour >= h and self.st.get("last_summary") != local.strftime("%Y-%m-%d"):
+                self.st["last_summary"] = local.strftime("%Y-%m-%d")
+                self.say(dash.summary_text(self.cfg, self.clock()))
             if now - self.st["last_regime"] >= 6 * 3600000:
                 ok, _ = self.cli("regime", "--write")
                 if ok:
@@ -447,7 +486,8 @@ class Bot:
             self.handle(upd)
 
 
-HELP = ("Comandos:\n/status trades abertos e resultado\n/scan procurar agora\n/clima clima do mercado\n"
+HELP = ("Comandos:\n/status trades abertos e resultado\n/painel link do painel\n/resumo resumo do dia\n"
+        "/scan procurar agora\n/clima clima do mercado\n"
         "/diario ultimos trades\n/pausar parar de procurar\n/retomar voltar a procurar\n\n"
         "Eu procuro sozinho a cada vela e te mando quando algo passar em todos os filtros. "
         "Ferramenta educacional, nao e recomendacao de investimento.")
@@ -545,6 +585,33 @@ def cmd_check():
         print("Dados de mercado FALHARAM: %s" % e)
 
 
+def start_dashboard(bot, port):
+    """Serves the read-only dashboard on this device only (127.0.0.1)."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            try:
+                body = dash.render(c.load_config(), bot.st).encode("utf-8")
+                code = 200
+            except Exception as e:                       # show the error instead of a blank page
+                body = ("<pre>erro ao montar o painel: %s</pre>" % e).encode("utf-8")
+                code = 500
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
 def cmd_run():
     load_secrets()
     ensure_config()
@@ -557,6 +624,12 @@ def cmd_run():
         print("\n>>> Abra o seu bot no Telegram e envie:   /start %s\n" % bot.pair_code(), flush=True)
     else:
         bot.say("Bot ligado. Conta %s. /ajuda para os comandos." % bot.cfg["env"].upper())
+    try:
+        start_dashboard(bot, bot.cfg["dashboard_port"])
+        print("[%s] painel: http://localhost:%d (abra no navegador deste aparelho)" % (
+            stamp(), bot.cfg["dashboard_port"]), flush=True)
+    except OSError as e:
+        print("[%s] painel nao abriu (%s): o bot continua sem ele" % (stamp(), e), flush=True)
     print("[%s] rodando (Ctrl+C para parar). Conta %s." % (stamp(), bot.cfg["env"]), flush=True)
     while True:
         try:

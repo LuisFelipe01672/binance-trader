@@ -71,8 +71,8 @@ class TestBasics(unittest.TestCase):
     def test_rounding(self):
         self.assertEqual(c.dstr(c.floor_step("0.0058312", "0.00001")), "0.00583")
         self.assertEqual(c.dstr(c.floor_step(429017.9, "1")), "429017")
-        self.assertEqual(c.money(1234.5), "R$ 1.234,50")
-        self.assertEqual(c.money(-7.981), "-R$ 7,98")
+        self.assertEqual(c.money(1234.5), "R$\u00a01.234,50")
+        self.assertEqual(c.money(-7.981), "-R$\u00a07,98")
 
     def test_rsi_and_ema(self):
         up = [float(x) for x in range(1, 40)]

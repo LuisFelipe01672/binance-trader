@@ -119,6 +119,7 @@ def scan(args, cfg):
             c.price_str(h["entry"], quote), c.price_str(h["stop"], quote), h["stop_rule"],
             c.pct(risk, 2), c.price_str(h["last"], quote)))
     c.write_json(c.path("scan.json"), {"time": c.ms(c.now(args.now)), "interval": args.interval,
+                                        "symbols": [x for x in symbols if x not in skipped],
                                         "lookback": args.lookback, "vol_mult": args.vol_mult, "hits": hits})
     print("\nProximo: plan --symbol X --setup Y monta stop e alvo; sim testa antes de arriscar.")
 

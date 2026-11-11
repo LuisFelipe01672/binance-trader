@@ -61,7 +61,11 @@ python3 binance-trader/scripts/telegram_bot.py run     # liga
 ```
 
 Na primeira vez, o terminal mostra um código. Envie `/start CODIGO` para o bot: só esse
-chat passa a poder aprovar. Comandos: `/status`, `/scan`, `/clima`, `/diario`, `/pausar`, `/retomar`.
+chat passa a poder aprovar. Comandos: `/status`, `/painel`, `/resumo`, `/scan`, `/clima`, `/diario`, `/pausar`, `/retomar`.
+
+- **Painel:** com o bot ligado, abra `http://localhost:8765` no navegador do mesmo aparelho. Mostra resultados, curva, trades abertos, clima, moedas vigiadas e os trades fantasmas. É só leitura e só o próprio aparelho acessa.
+- **Trades fantasmas:** todo sinal é acompanhado como se tivesse sido feito, até os bloqueados e os que você recusou, para medir a estratégia sem arriscar nada.
+- **Resumo diário:** às 21h (Brasília), no Telegram (`daily_summary_hour`).
 
 Ele precisa rodar num aparelho fora dos EUA, porque a Binance bloqueia IPs americanos.
 Por exemplo: o próprio celular Android (Termux), um PC em casa, ou um servidor em São Paulo.
@@ -87,7 +91,7 @@ do bot (`config.bot.example.json`) é testnet, em USDT.
 python3 -m unittest discover -s tests -v
 ```
 
-São 40 testes offline (29 da skill e 11 do bot, com Telegram e Binance falsos), com dados reais da Binance salvos em `tests/fixtures`. Cobrem:
+São 78 testes offline (skill, bot com Telegram e Binance falsos, fantasmas e painel), com dados reais da Binance salvos em `tests/fixtures`. Cobrem:
 - a assinatura HMAC, conferida com o exemplo da documentação da Binance;
 - o envio para uma Binance simulada;
 - as três travas da conta real;

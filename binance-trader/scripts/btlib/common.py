@@ -54,6 +54,8 @@ DEFAULT_CONFIG = {
     "entry_timeout_min": 60,         # bot cancels an entry order not filled by then
     "bot_skip_no_edge": True,        # bot does not propose trades the simulation calls SEM VANTAGEM
     "bot_interval": "15m",           # candles the bot scans
+    "dashboard_port": 8765,          # painel em http://localhost:8765 no proprio aparelho
+    "daily_summary_hour": 21,        # resumo diario no Telegram a esta hora (Brasilia); -1 desliga
 }
 
 
@@ -194,8 +196,8 @@ def money(x, quote="BRL", nd=2):
     x = float(x)
     if quote == "BRL":
         s = "{:,.{}f}".format(abs(x), nd).replace(",", "X").replace(".", ",").replace("X", ".")
-        return ("-" if x < 0 else "") + "R$ " + s
-    return "{:,.{}f} {}".format(x, nd, quote)
+        return ("-" if x < 0 else "") + "R$\u00a0" + s
+    return "{:,.{}f}\u00a0{}".format(x, nd, quote)
 
 
 def price_str(x, quote="BRL"):
@@ -207,7 +209,7 @@ def price_str(x, quote="BRL"):
 
 
 def pct(x, nd=1):
-    return ("{:.%df}" % nd).format(x).replace(".", ",") + " %"
+    return ("{:.%df}" % nd).format(x).replace(".", ",") + "\u00a0%"      # no line break before %
 
 
 def fingerprint(obj):
