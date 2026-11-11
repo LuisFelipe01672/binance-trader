@@ -14,7 +14,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
 PUBLIC_DATA_API = "https://data-api.binance.vision"   # public market data, no key
-DATA_API = PUBLIC_DATA_API
+DATA_API = PUBLIC_DATA_API          # where candles and prices come from
+ORDER_API = "https://testnet.binance.vision"   # market where orders go: tradable symbols and their rules
 ENV_URLS = {
     "testnet": "https://testnet.binance.vision",       # fake money (default)
     "demo": "https://demo-api.binance.com",            # Binance demo trading, fake money
@@ -47,13 +48,19 @@ DEFAULT_CONFIG = {
     "env": "testnet",                # testnet | demo | prod
     "allow_live": False,             # must be true (plus two more locks) for prod
     "approval_minutes": 15,          # a "sim" is valid this long
-    "market_data": "auto",           # auto: testnet/demo read prices from their own market
+    "market_data": "real",           # real: signals, simulations and ghosts read the REAL market (public data)
+                                     # even on testnet, whose prices are thin and artificial; "env": the env's own
     "watchlist": [],                 # ["BTC", "ETH"...], "auto" (most traded), or empty = every pair
     "auto_top": 15,                  # how many coins the "auto" watchlist keeps
     "min_volume_24h": 500000,        # scan skips pairs with less volume (quote asset)
     "entry_timeout_min": 60,         # bot cancels an entry order not filled by then
     "bot_skip_no_edge": True,        # bot does not propose trades the simulation calls SEM VANTAGEM
-    "bot_interval": "15m",           # candles the bot scans
+    "bot_interval": "15m",           # (old single setting, used when bot_intervals is empty)
+    "bot_intervals": ["15m", "1h"],  # candle sizes the bot scans; ghosts compare them
+    "learn_enabled": True,           # turn off setups the ghosts show are losing
+    "learn_min_samples": 15,         # results needed before judging (twice that for a setup on all coins)
+    "learn_window": 30,              # judge on the most recent results only
+    "learn_min_avg_r": 0.0,          # off while the recent average is below this
     "dashboard_port": 8765,          # painel em http://localhost:8765 no proprio aparelho
     "daily_summary_hour": 21,        # resumo diario no Telegram a esta hora (Brasilia); -1 desliga
 }
@@ -94,12 +101,15 @@ def load_config(p=None):
     cfg.update({k: v for k, v in user.items() if not k.startswith("_")})
     if cfg["env"] not in ENV_URLS:
         raise SystemExit("config env must be testnet, demo or prod, not %r" % cfg["env"])
-    global DATA_API
-    # testnet and demo are separate markets with their own prices: plan on the market you trade
-    if cfg["market_data"] == "auto":
-        DATA_API = ENV_URLS[cfg["env"]] if cfg["env"] in ("testnet", "demo") else PUBLIC_DATA_API
+    global DATA_API, ORDER_API
+    ORDER_API = PUBLIC_DATA_API if cfg["env"] == "prod" else ENV_URLS[cfg["env"]]   # prod: same market, public mirror
+    md = cfg["market_data"]
+    if md in ("real", "auto"):
+        DATA_API = PUBLIC_DATA_API
+    elif md == "env":
+        DATA_API = ENV_URLS[cfg["env"]] if cfg["env"] != "prod" else PUBLIC_DATA_API
     else:
-        DATA_API = cfg["market_data"]
+        DATA_API = md
     return cfg
 
 

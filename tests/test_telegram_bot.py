@@ -85,7 +85,7 @@ class TestBot(Home):
         extra = {"plan": ["--offline", BTC, "--rules", RULES, "--recent", "400"],
                  "sim": ["--offline", BTC, "--replays", "300"], "size": ["--rules", RULES],
                  "risk": ["--no-price", "--now", NOW], "regime": ["--offline", BTC1D, "--now", NOW],
-                 "rules": [RULES]}
+                 "rules": [RULES], "scan": ["--offline-dir", os.path.dirname(BTC), "--symbols", "BTC", "--now", NOW]}
         self.bot = TB.Bot(self.tg, c.load_config(), binance_http=self.bn, extra=extra,
                           clock=lambda: self.clock[0], log=lambda m: None)
 

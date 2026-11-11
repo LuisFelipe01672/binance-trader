@@ -116,6 +116,7 @@ def stats(ghosts):
     for g in done:
         groups.setdefault(("setup", g["setup"]), []).append(g)
         groups.setdefault(("decisao", group_of(g["decision"])), []).append(g)
+        groups.setdefault(("velas", "velas de %s" % g.get("interval", "15m")), []).append(g)
     out["groups"] = {k: {"n": len(v), "win_rate": sum(1 for g in v if g["r"] > 0) / len(v),
                          "avg_r": sum(g["r"] for g in v) / len(v)} for k, v in groups.items()}
     return out
@@ -124,4 +125,5 @@ def stats(ghosts):
 def group_of(decision):
     return {"bloqueado": "bloqueado pelo risco", "sem vantagem": "sem vantagem na simulacao",
             "aprovado": "aprovado por voce", "recusado": "recusado por voce",
-            "expirou": "voce nao respondeu", "proposto": "proposto"}.get(decision, decision)
+            "expirou": "voce nao respondeu", "proposto": "proposto",
+            "desligado": "desligado pelo aprendizado"}.get(decision, decision)

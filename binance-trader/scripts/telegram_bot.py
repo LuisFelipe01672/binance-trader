@@ -6,6 +6,10 @@ acompanha o trade ate o fim (alvo, stop ou prazo).
   python3 telegram_bot.py setup     # pergunta token do bot e chaves da Binance (uma vez)
   python3 telegram_bot.py run       # liga o bot (deixe rodando)
   python3 telegram_bot.py check     # confere token, chaves e conexao, sem operar
+  python3 telegram_bot.py start     # liga em segundo plano (pode fechar o Termux)
+  python3 telegram_bot.py stop      # para o bot que esta em segundo plano
+  python3 telegram_bot.py log       # mostra o que ele esta fazendo
+  python3 telegram_bot.py install-boot   # liga sozinho quando o celular liga (app Termux:Boot)
 
 Segredos ficam em ~/.binance-trader/secrets.env (permissao 600), nunca no codigo.
 So o seu chat do Telegram, pareado com um codigo na primeira vez, pode aprovar.
@@ -25,7 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import bt  # noqa: E402
-from btlib import broker, common as c, dash, data, ghost as G, journal as J, size  # noqa: E402
+from btlib import broker, common as c, dash, data, ghost as G, journal as J, learn, size  # noqa: E402
 
 SECRETS = os.path.expanduser(os.environ.get("BT_SECRETS", "~/.binance-trader/secrets.env"))
 TG_API = "https://api.telegram.org/bot%s/%s"
@@ -193,7 +197,7 @@ class Bot:
             self.say("Pausado: nao procuro trades novos. Os trades abertos continuam com stop e alvo na Binance. /retomar para voltar.")
         elif cmd in ("/retomar", "retomar"):
             self.st["paused"] = False
-            self.say("Retomado. Procuro a cada vela de %s." % self.cfg["bot_interval"])
+            self.say("Retomado. Procuro a cada vela de %s." % " e ".join(self.intervals()))
         elif cmd in ("/painel", "painel"):
             self.say("Painel: http://localhost:%d\nAbra esse endereco no navegador DESTE celular "
                      "(o mesmo onde o Termux esta rodando)." % self.cfg["dashboard_port"])
@@ -227,29 +231,44 @@ class Bot:
             self.tg.answer(cb["id"])
 
     # -------------------------------------------------- proposals
-    def scan_and_propose(self, force=False):
-        """Scans; every fresh signal becomes a ghost; the first one that passes everything is proposed.
-        Paused or with a proposal already waiting, signals are still followed as ghosts."""
-        ok, out = self.cli("scan", "--interval", self.cfg["bot_interval"])
-        if not ok:
-            self.log("scan falhou: " + out)
-            if force:
-                self.say("Nao consegui procurar: " + out[-500:])
-            return
-        hits = [h for h in (c.read_json(c.path("scan.json"), {}) or {}).get("hits", []) if h["bars_ago"] == 0]
+    def intervals(self):
+        return list(self.cfg.get("bot_intervals") or [self.cfg["bot_interval"]])
+
+    def scan_and_propose(self, force=False, intervals=None):
+        """Scans each candle size; every fresh signal becomes a ghost; the first one that passes
+        everything is proposed. Paused, already waiting, or turned off by the learning, signals
+        are still followed as ghosts."""
+        hits = []
+        for iv in intervals or self.intervals():
+            ok, out = self.cli("scan", "--interval", iv)
+            if not ok:
+                self.log("scan %s falhou: %s" % (iv, out))
+                if force:
+                    self.say("Nao consegui procurar (%s): %s" % (iv, out[-400:]))
+                continue
+            for h in (c.read_json(c.path("scan.json"), {}) or {}).get("hits", []):
+                if h["bars_ago"] == 0:
+                    h["interval"] = iv
+                    hits.append(h)
         waiting = self.live_pending()
+        off = self.st.get("learn_off", {})
         proposed, skipped = False, []
         for h in hits:
+            tag = "%s %s (%s)" % (h["symbol"], h["setup"], h["interval"])
+            blocked = learn.blocked(off, h["setup"], h["symbol"], h["interval"])
             if self.st["paused"] and not force:
                 self.ghost_only(h, "pausado", "bot pausado")
+            elif blocked:
+                self.ghost_only(h, "desligado", "aprendizado: %s" % blocked[1])
+                skipped.append("%s: desligado pelo aprendizado (%s)" % (tag, blocked[1]))
             elif waiting or proposed:
                 self.ghost_only(h, "nao avaliado", "ja havia uma proposta esperando")
             else:
-                res = self.evaluate(h["symbol"], h["setup"])
+                res = self.evaluate(h["symbol"], h["setup"], h["interval"])
                 if res is True:
                     proposed = True
                 else:
-                    skipped.append("%s %s: %s" % (h["symbol"], h["setup"], res))
+                    skipped.append("%s: %s" % (tag, res))
         if force and not proposed:
             if waiting:
                 self.say("Ja tem uma proposta esperando a sua resposta.")
@@ -262,13 +281,14 @@ class Bot:
     def ghost_only(self, h, decision, reason):
         path = c.path("plan-ghost.json")
         ok, out = self.cli("plan", "--symbol", h["symbol"], "--setup", h["setup"],
-                           "--interval", self.cfg["bot_interval"], "--write", path)
+                           "--interval", h.get("interval", self.intervals()[0]), "--write", path)
         if ok:
             G.record(c.read_json(path), decision, reason, self.cfg, self.clock())
 
-    def evaluate(self, symbol, setup):
+    def evaluate(self, symbol, setup, interval=None):
         """plan -> sim -> size -> risk. Proposes and returns True, or returns why not."""
-        ok, out = self.cli("plan", "--symbol", symbol, "--setup", setup, "--interval", self.cfg["bot_interval"])
+        interval = interval or self.intervals()[0]
+        ok, out = self.cli("plan", "--symbol", symbol, "--setup", setup, "--interval", interval)
         if not ok:
             return "plano: " + out.splitlines()[-1]
         gk = G.record(c.read_json(c.path("plan.json")), "avaliando", None, self.cfg, self.clock())
@@ -293,14 +313,15 @@ class Bot:
             return no("bloqueado", "; ".join(r.get("reasons", [])) if r else "risco sem resposta")
         warns = [l.strip()[7:] for l in risk_out.splitlines() if l.strip().startswith("aviso:")]
         G.set_decision(gk, "proposto", None)
-        self.propose(o, sim, warns, gk)
+        self.propose(o, sim, warns, gk, interval)
         return True
 
-    def propose(self, o, sim, warns, ghost_key=None):
+    def propose(self, o, sim, warns, ghost_key=None, interval=None):
         q = o["quote"]
         b, h = sim.get("bootstrap", {}), sim.get("history", {})
         lines = [
-            "%s  %s  |  conta %s" % (o["symbol"], (o.get("setup") or "").upper(), self.cfg["env"].upper()),
+            "%s  %s  |  velas de %s  |  conta %s" % (o["symbol"], (o.get("setup") or "").upper(),
+                                                     interval or "?", self.cfg["env"].upper()),
             "",
             "COMPRAR %s %s a %s (ordem limite, ~%s)" % (o["qty"], o["base"], c.price_str(o["entry"], q), c.money(o["notional"], q)),
             "ALVO  %s  -> ganho ~%s" % (c.price_str(o["target"], q), c.money(o["target_gain"], q)),
@@ -486,6 +507,7 @@ class Bot:
             if now - self.st.get("last_ghosts", 0) >= 300000:
                 self.st["last_ghosts"] = now
                 G.update_all(self.clock())
+                self.relearn()
             h = self.cfg.get("daily_summary_hour", 21)
             local = c.brt(self.clock())
             if h >= 0 and local.hour >= h and self.st.get("last_summary") != local.strftime("%Y-%m-%d"):
@@ -495,10 +517,15 @@ class Bot:
                 ok, _ = self.cli("regime", "--write")
                 if ok:
                     self.st["last_regime"] = now
-            iv = data.INTERVAL_MS[self.cfg["bot_interval"]]
-            if now // iv > self.st["last_scan"] // iv and now % iv >= 30000:   # 30 s after each candle closes
-                self.st["last_scan"] = now
-                self.scan_and_propose()
+            due = []
+            scans = self.st.setdefault("scans", {})
+            for name in self.intervals():
+                iv = data.INTERVAL_MS[name]
+                if now // iv > scans.get(name, 0) // iv and now % iv >= 30000:   # 30 s after the candle closes
+                    scans[name] = now
+                    due.append(name)
+            if due:
+                self.scan_and_propose(intervals=due)
             self.live_pending()
         except Exception as e:                                           # keep running, tell the owner
             self.log(traceback.format_exc())
@@ -506,6 +533,17 @@ class Bot:
                 self.st["last_error"] = now
                 self.say("Erro no bot (ele continua rodando): %s" % str(e)[:300])
         self.save()
+
+    def relearn(self):
+        """Recomputes what the learning turns off and tells the owner what changed."""
+        new = learn.off_set(G.load()["ghosts"], self.cfg)
+        old = self.st.get("learn_off", {})
+        lines = ["Desliguei %s: %s." % (learn.label(k), v) for k, v in new.items() if k not in old]
+        lines += ["Religuei %s: voltou a dar resultado." % learn.label(k) for k in old if k not in new]
+        self.st["learn_off"] = new
+        if lines:
+            self.say("Aprendizado (pelos trades fantasmas):\n- " + "\n- ".join(lines) +
+                     "\nOs desligados continuam sendo acompanhados como fantasmas.")
 
     def poll(self):
         for upd in self.tg.updates(self.st.get("offset")):
@@ -638,6 +676,98 @@ def start_dashboard(bot, port):
     return srv
 
 
+# ---------------------------------------------------------------- one bot at a time, background, boot
+def pid_path():
+    return c.path("state", "bot.pid")
+
+
+def log_path():
+    return c.path("bot.log")
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def running_pid():
+    try:
+        with open(pid_path()) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    return pid if pid != os.getpid() and alive(pid) else None
+
+
+def cmd_start():
+    """Starts the bot in the background (used by Termux:Boot too)."""
+    pid = running_pid()
+    if pid:
+        print("O bot ja esta rodando (processo %d). Para ver: log   Para parar: stop" % pid)
+        return
+    import subprocess
+    os.makedirs(os.path.dirname(log_path()), exist_ok=True)
+    if os.path.exists(log_path()) and os.path.getsize(log_path()) > 2_000_000:
+        os.replace(log_path(), log_path() + ".old")
+    with open(log_path(), "a") as log:
+        p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "run"], stdout=log, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, start_new_session=True, cwd=os.getcwd())
+    time.sleep(3)
+    if p.poll() is None:
+        print("Bot ligado em segundo plano (processo %d). Pode fechar esta tela." % p.pid)
+        print("Ver o que ele esta fazendo:  python binance-trader/scripts/telegram_bot.py log")
+    else:
+        print("O bot nao subiu. Ultimas linhas do log:")
+        cmd_log()
+
+
+def cmd_stop():
+    import signal
+    pid = running_pid()
+    if not pid:
+        print("Nenhum bot rodando.")
+        return
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(20):
+        if not alive(pid):
+            break
+        time.sleep(0.5)
+    print("Bot parado." if not alive(pid) else "O bot nao parou: tente de novo.")
+
+
+def cmd_log(n=40):
+    try:
+        with open(log_path(), encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print("Ainda nao ha log.")
+        return
+    print("".join(lines[-n:]).rstrip())
+
+
+def boot_script(repo_dir, python=None):
+    return ("#!/data/data/com.termux/files/usr/bin/sh\n"
+            "# liga o bot do binance-trader quando o celular liga (app Termux:Boot)\n"
+            "termux-wake-lock\n"
+            "sleep 20\n"
+            "cd '%s' && '%s' binance-trader/scripts/telegram_bot.py start\n") % (repo_dir, python or sys.executable)
+
+
+def cmd_install_boot():
+    d = os.path.expanduser("~/.termux/boot")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "binance-trader.sh")
+    with open(p, "w") as f:
+        f.write(boot_script(os.getcwd()))
+    os.chmod(p, 0o700)
+    print("Pronto: %s" % p)
+    print("Abra o app Termux:Boot uma vez (so abrir e fechar) para o Android liberar.")
+    print("A partir dai, quando o celular ligar, o bot liga sozinho em uns 20 segundos.")
+
+
 def cmd_run():
     load_secrets()
     ensure_config()
@@ -645,6 +775,17 @@ def cmd_run():
     if not tok:
         raise SystemExit("falta o token: rode  python3 telegram_bot.py setup")
     stamp = lambda: time.strftime("%H:%M:%S")
+    other = running_pid()
+    if other:
+        raise SystemExit("Ja tem um bot rodando (processo %d). Dois ao mesmo tempo brigam pelo Telegram.\n"
+                         "Para parar o outro:  python binance-trader/scripts/telegram_bot.py stop" % other)
+    import atexit
+    import signal
+    os.makedirs(os.path.dirname(pid_path()), exist_ok=True)
+    with open(pid_path(), "w") as f:
+        f.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(pid_path()) and running_pid() is None and os.remove(pid_path()))
+    signal.signal(signal.SIGTERM, lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
     bot = Bot(Telegram(tok), log=lambda m: print("[%s] %s" % (stamp(), m), flush=True))
     if not bot.st.get("chat_id"):
         print("\n>>> Abra o seu bot no Telegram e envie:   /start %s\n" % bot.pair_code(), flush=True)
@@ -671,4 +812,5 @@ def cmd_run():
 
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "help"
-    {"setup": cmd_setup, "run": cmd_run, "check": cmd_check}.get(what, lambda: print(__doc__))()
+    {"setup": cmd_setup, "run": cmd_run, "check": cmd_check, "start": cmd_start, "stop": cmd_stop,
+     "log": cmd_log, "install-boot": cmd_install_boot}.get(what, lambda: print(__doc__))()

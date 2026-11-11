@@ -78,11 +78,12 @@ def auto_watchlist(quote, top=15, tickers=None, tradable=None, listed=None):
     """The `top` most traded coins against `quote` on the REAL market (testnet volume is fake),
     kept only if they can be traded where the bot trades. Stablecoins and leveraged tokens out."""
     if tickers is None:
-        tickers = _cache("ticker24h-real.json", lambda: ticker_24h(c.PUBLIC_DATA_API), max_age_h=6)
+        tickers = _cache("ticker24h-real.json", lambda: ticker_24h(c.PUBLIC_DATA_API), max_age_h=6,
+                         base=c.PUBLIC_DATA_API)
     if tradable is None:
         tradable = set(trading_symbols(quote))
     if listed is None:
-        listed = _cache("listed-real.json", lambda: sorted(
+        listed = _cache("listed-real.json", base=c.PUBLIC_DATA_API, fetch=lambda: sorted(
             s["symbol"] for s in c.http("GET", c.PUBLIC_DATA_API + "/api/v3/exchangeInfo",
                                          {"symbolStatus": "TRADING", "permissions": "SPOT"}, timeout=60)["symbols"]))
         listed = set(listed)
@@ -101,8 +102,9 @@ def auto_watchlist(quote, top=15, tickers=None, tradable=None, listed=None):
     return [s for _, s in ranked[:top]]
 
 
-def _cache(name, fetch, max_age_h=24):
-    p = c.path("cache", c.DATA_API.split("//")[1].split(".")[0] + "-" + name)   # testnet/demo/prod differ
+def _cache(name, fetch, max_age_h=24, base=None):
+    host = (base or c.DATA_API).split("//")[1].split(".")[0]               # testnet/demo/prod differ
+    p = c.path("cache", host + "-" + name)
     hit = c.read_json(p)
     if hit and time.time() - hit.get("_saved", 0) < max_age_h * 3600:
         return hit["data"]
@@ -112,12 +114,12 @@ def _cache(name, fetch, max_age_h=24):
 
 
 def trading_symbols(quote="BRL", offline=None):
-    """Symbols trading now against `quote`, stablecoins left out."""
+    """Symbols trading now against `quote` where orders go (c.ORDER_API), stablecoins left out."""
     if offline:
         info = c.read_json(offline)
     else:
-        info = _cache("exchangeInfo-all.json", lambda: c.http(
-            "GET", c.DATA_API + "/api/v3/exchangeInfo",
+        info = _cache("exchangeInfo-all.json", base=c.ORDER_API, fetch=lambda: c.http(
+            "GET", c.ORDER_API + "/api/v3/exchangeInfo",
             {"symbolStatus": "TRADING", "permissions": "SPOT"}, timeout=60))
     return [s["symbol"] for s in info["symbols"]
             if s["quoteAsset"] == quote and s.get("status", "TRADING") == "TRADING"
@@ -130,8 +132,8 @@ def symbol_rules(symbol, offline=None):
     if offline:
         info = c.read_json(offline)
     else:
-        info = _cache("exchangeInfo-%s.json" % symbol, lambda: c.http(
-            "GET", c.DATA_API + "/api/v3/exchangeInfo", {"symbol": symbol}))
+        info = _cache("exchangeInfo-%s.json" % symbol, base=c.ORDER_API, fetch=lambda: c.http(
+            "GET", c.ORDER_API + "/api/v3/exchangeInfo", {"symbol": symbol}))
     for s in info["symbols"]:
         if s["symbol"] == symbol:
             f = {x["filterType"]: x for x in s["filters"]}

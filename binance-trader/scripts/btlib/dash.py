@@ -149,6 +149,14 @@ def render(cfg, bot_state, now=None, price=None):
                      line_chart(gcum, lambda v: "%+.1fR" % v, "Os resultados aparecem aqui conforme os sinais terminam."),
                      ('<div class="scroll"><table><tr><th>Grupo</th><th>Sinais</th><th>Acerto</th><th>Media</th></tr>%s</table></div>' % grows) if grows else ""))
 
+    # learning
+    off = bot_state.get("learn_off") or {}
+    if off:
+        from . import learn
+        parts.append('<section><h2>Desligados pelo aprendizado</h2><ul>%s</ul><p class="note">Continuam sendo '
+                     'acompanhados como fantasmas e voltam sozinhos se melhorarem.</p></section>' % "".join(
+                         "<li>%s <span class='muted'>(%s)</span></li>" % (E(learn.label(k)), E(v)) for k, v in sorted(off.items())))
+
     # recent signals
     recent = sorted(ghosts, key=lambda g: g["signal_time"], reverse=True)[:15]
     if recent:
@@ -159,7 +167,8 @@ def render(cfg, bot_state, now=None, price=None):
                 return "<span class='muted'>compra nao executaria</span>"
             return "<span class='%s nowrap'>%+.2fR</span><div class='muted small'>%s</div>" % (_tone(g["r"]), g["r"], g["status"])
         rows = "".join("<tr><td>%s</td><td><b>%s</b><div class='muted small'>%s</div></td><td>%s</td><td>%s</td></tr>" % (
-            c.fmt_time(g["signal_time"]), E(g["symbol"][:-len(q)] if g["symbol"].endswith(q) else g["symbol"]), E(g["setup"]),
+            c.fmt_time(g["signal_time"]), E(g["symbol"][:-len(q)] if g["symbol"].endswith(q) else g["symbol"]),
+            E("%s · %s" % (g["setup"], g.get("interval", "15m"))),
             E(G.group_of(g["decision"])) + ("<div class='muted small'>%s</div>" % E(g["reason"] or "") if g.get("reason") else ""),
             res(g)) for g in recent)
         parts.append('<section><h2>Ultimos sinais</h2><div class="scroll"><table><tr><th>Quando</th><th>Moeda</th>'

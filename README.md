@@ -57,8 +57,25 @@ pergunta se você quer sair.
 ```bash
 python3 binance-trader/scripts/telegram_bot.py setup   # token do bot e chaves (digitados escondidos)
 python3 binance-trader/scripts/telegram_bot.py check   # confere tudo sem operar
-python3 binance-trader/scripts/telegram_bot.py run     # liga
+python3 binance-trader/scripts/telegram_bot.py run     # liga nesta tela
+python3 binance-trader/scripts/telegram_bot.py start   # liga em segundo plano (pode fechar o Termux)
+python3 binance-trader/scripts/telegram_bot.py stop    # para
+python3 binance-trader/scripts/telegram_bot.py log     # o que ele esta fazendo
+python3 binance-trader/scripts/telegram_bot.py install-boot   # liga sozinho com o celular (app Termux:Boot)
 ```
+
+So roda um bot por vez: um segundo e recusado, porque os dois brigariam pelo Telegram.
+
+**Dados reais, ordens na testnet.** Sinais, simulacoes e fantasmas usam sempre o mercado
+real (dados publicos), porque os precos da testnet sao artificiais. A testnet serve so
+para testar o envio de ordens (`market_data` na config).
+
+**Velas de 15 min e de 1 hora** ao mesmo tempo (`bot_intervals`). Os fantasmas comparam as duas.
+
+**Aprendizado.** Com 15 resultados de um setup numa moeda (30 para um setup em todas as
+moedas), o bot desliga sozinho o que esta com media negativa nos ultimos 30 e avisa no
+Telegram. Os desligados continuam sendo acompanhados como fantasmas e voltam sozinhos se
+melhorarem (`learn_*` na config).
 
 Na primeira vez, o terminal mostra um código. Envie `/start CODIGO` para o bot: só esse
 chat passa a poder aprovar. Comandos: `/status`, `/painel`, `/exportar` (painel em arquivo, para abrir no PC ou encaminhar), `/resumo`, `/scan`, `/clima`, `/diario`, `/pausar`, `/retomar`.
@@ -91,7 +108,7 @@ do bot (`config.bot.example.json`) é testnet, em USDT.
 python3 -m unittest discover -s tests -v
 ```
 
-São 78 testes offline (skill, bot com Telegram e Binance falsos, fantasmas e painel), com dados reais da Binance salvos em `tests/fixtures`. Cobrem:
+São 103 testes offline (skill, bot com Telegram e Binance falsos, fantasmas e painel), com dados reais da Binance salvos em `tests/fixtures`. Cobrem:
 - a assinatura HMAC, conferida com o exemplo da documentação da Binance;
 - o envio para uma Binance simulada;
 - as três travas da conta real;

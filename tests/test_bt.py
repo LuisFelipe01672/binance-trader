@@ -112,6 +112,21 @@ class TestAutoWatchlist(unittest.TestCase):
         self.assertEqual(got, ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"])
 
 
+class TestDataSources(Home):
+    def test_testnet_signals_use_the_real_market_orders_use_testnet(self):
+        self.cfg(env="testnet")
+        self.assertEqual(c.DATA_API, "https://data-api.binance.vision")
+        self.assertEqual(c.ORDER_API, "https://testnet.binance.vision")
+
+    def test_env_data_on_request(self):
+        self.cfg(env="testnet", market_data="env")
+        self.assertEqual(c.DATA_API, "https://testnet.binance.vision")
+
+    def test_prod_reads_public_mirror(self):
+        self.cfg(env="prod")
+        self.assertEqual((c.DATA_API, c.ORDER_API), ("https://data-api.binance.vision",) * 2)
+
+
 class TestSetupsAndSim(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

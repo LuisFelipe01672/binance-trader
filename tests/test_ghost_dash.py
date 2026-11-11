@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "binance-trader", "scripts"))
 from test_bt import BTC, Home, bar  # noqa: E402
 from test_telegram_bot import NOW, TestBot as BotBase  # noqa: E402
 import telegram_bot as TB  # noqa: E402
-from btlib import common as c, dash, data, ghost as G, journal as J  # noqa: E402
+from btlib import common as c, dash, data, ghost as G, journal as J, learn  # noqa: E402
 
 IV = 900000
 T0 = 1794150000000
@@ -113,6 +113,7 @@ class TestBotGhosts(BotBase):
         self.bot.st["last_scan"] = c.ms(self.clock[0])
         self.bot.st["last_monitor"] = self.bot.st["last_ghosts"] = c.ms(self.clock[0])
         self.bot.st["last_regime"] = c.ms(self.clock[0])
+        self.bot.st["scans"] = {"15m": c.ms(self.clock[0]), "1h": c.ms(self.clock[0])}
         n = len(self.tg.sent)
         self.bot.tick()
         self.assertEqual(len(self.tg.sent), n + 1)
@@ -134,6 +135,105 @@ class TestBotGhosts(BotBase):
         self.pair()
         self.msg("/painel", uid=7)
         self.assertIn("http://localhost:8765", self.tg.sent[-1]["text"])
+
+
+class TestLearning(unittest.TestCase):
+    CFG = {"learn_enabled": True, "learn_min_samples": 15, "learn_window": 30, "learn_min_avg_r": 0.0}
+
+    def ghosts(self, rs, setup="pullback", symbol="DOGEUSDT", iv="15m", start=0):
+        return [g0(setup=setup, symbol=symbol, interval=iv, status="alvo" if r > 0 else "stop", r=r,
+                   resolved=start + k) for k, r in enumerate(rs)]
+
+    def test_off_only_after_enough_samples(self):
+        self.assertEqual(learn.off_set(self.ghosts([-1.0] * 14), self.CFG), {})
+        off = learn.off_set(self.ghosts([-1.0] * 10 + [1.2] * 5), self.CFG)
+        self.assertIn("pullback|DOGEUSDT|15m", off)
+        self.assertNotIn("pullback|*|15m", off)                   # all-coins level needs 30
+
+    def test_comes_back_when_recent_results_recover(self):
+        gs = self.ghosts([-1.0] * 20 + [1.3] * 30)
+        self.assertEqual(learn.off_set(gs, self.CFG), {})          # last 30 are winners
+
+    def test_levels_and_lookup(self):
+        gs = self.ghosts([-1.0] * 16, symbol="AUSDT") + self.ghosts([-0.5] * 16, symbol="BUSDT", start=100)
+        off = learn.off_set(gs, self.CFG)
+        self.assertIn("pullback|*|15m", off)
+        self.assertTrue(learn.blocked(off, "pullback", "CUSDT", "15m"))   # setup off on every coin
+        self.assertFalse(learn.blocked(off, "pullback", "CUSDT", "1h"))
+        self.assertFalse(learn.blocked(off, "repique", "AUSDT", "15m"))
+
+    def test_unfilled_and_open_do_not_count(self):
+        gs = [g0(status="nao executou", r=0.0)] * 20 + [g0()] * 20
+        self.assertEqual(learn.scores(gs, self.CFG), {})
+
+    def test_disabled(self):
+        self.assertEqual(learn.off_set(self.ghosts([-1.0] * 20), dict(self.CFG, learn_enabled=False)), {})
+
+
+class TestBotLearningAndIntervals(BotBase):
+    def test_relearn_tells_once_and_when_it_comes_back(self):
+        self.pair()
+        G.save({"ghosts": TestLearning().ghosts([-1.0] * 15, setup="rompimento", symbol="BTCBRL")})
+        self.bot.relearn()
+        self.assertIn("Desliguei rompimento em BTCBRL", self.tg.sent[-1]["text"])
+        n = len(self.tg.sent)
+        self.bot.relearn()
+        self.assertEqual(len(self.tg.sent), n)
+        G.save({"ghosts": TestLearning().ghosts([1.2] * 30, setup="rompimento", symbol="BTCBRL")})
+        self.bot.relearn()
+        self.assertIn("Religuei", self.tg.sent[-1]["text"])
+
+    def test_off_signal_is_ghosted_not_proposed(self):
+        self.pair()
+        self.bot.st["learn_off"] = {"rompimento|BTCBRL|15m": "-0.50R medio nos ultimos 15 sinais"}
+        real_cli = self.bot.cli
+
+        def cli(cmd, *a):
+            if cmd == "scan":
+                p = c.read_json(c.path("plan.json")) or {}
+                c.write_json(c.path("scan.json"), {"time": 0, "hits": [
+                    {"symbol": "BTCBRL", "setup": "rompimento", "bars_ago": 0}]})
+                return True, ""
+            return real_cli(cmd, *a)
+        self.bot.cli = cli
+        self.bot.scan_and_propose(force=True, intervals=["15m"])
+        self.assertFalse(any(m["buttons"] for m in self.tg.sent))
+        self.assertIn("desligado pelo aprendizado", self.tg.sent[-1]["text"])
+        g = G.load()["ghosts"][0]
+        self.assertEqual((g["decision"], g["interval"]), ("desligado", "15m"))
+
+    def test_15m_and_1h_scan_on_their_own_candles(self):
+        self.pair()
+        seen = []
+        self.bot.scan_and_propose = lambda force=False, intervals=None: seen.append(tuple(intervals))
+        self.bot.monitor = lambda: None
+        self.bot.relearn = lambda: None
+        self.bot.cli = lambda *a: (True, "")
+        for t in ("2026-11-08 12:00", "2026-11-08 12:15", "2026-11-08 12:30", "2026-11-08 13:00"):
+            self.clock[0] = c.from_ms(c.ms(c.now(t)) + 40000)        # 40 s after the candle closes
+            self.bot.tick()
+        self.assertEqual(seen, [("15m", "1h"), ("15m",), ("15m",), ("15m", "1h")])
+
+
+class TestProcess(Home):
+    def test_stale_pid_is_not_a_running_bot(self):
+        os.makedirs(os.path.dirname(TB.pid_path()), exist_ok=True)
+        with open(TB.pid_path(), "w") as f:
+            f.write("999999")                                      # no such process
+        self.assertIsNone(TB.running_pid())
+        with open(TB.pid_path(), "w") as f:
+            f.write(str(os.getppid()))                             # a live process that is not us
+        self.assertEqual(TB.running_pid(), os.getppid())
+        with open(TB.pid_path(), "w") as f:
+            f.write(str(os.getpid()))                              # ourselves
+        self.assertIsNone(TB.running_pid())
+
+    def test_boot_script(self):
+        s = TB.boot_script("/data/data/com.termux/files/home/binance-trader", "/usr/bin/python")
+        self.assertTrue(s.startswith("#!/data/data/com.termux/files/usr/bin/sh\n"))
+        self.assertIn("termux-wake-lock", s)
+        self.assertIn("cd '/data/data/com.termux/files/home/binance-trader' && '/usr/bin/python' "
+                      "binance-trader/scripts/telegram_bot.py start", s)
 
 
 class TestDashboard(Home):
