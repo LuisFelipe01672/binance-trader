@@ -55,8 +55,50 @@ def price(symbol, offline_bars=None):
     return float(c.http("GET", c.DATA_API + "/api/v3/ticker/price", {"symbol": symbol.upper()})["price"])
 
 
-def ticker_24h():
-    return c.http("GET", c.DATA_API + "/api/v3/ticker/24hr", timeout=40)
+def ticker_24h(base=None):
+    return c.http("GET", (base or c.DATA_API) + "/api/v3/ticker/24hr", timeout=40)
+
+
+LEVERAGED = ("UP", "DOWN", "BULL", "BEAR")
+
+
+def _not_crypto(t, base, listed):
+    """Stablecoins (price pinned near 1) and tokenized stocks (NVDAB, SOXLB...: name ends in B
+    and no BTC pair, which every real coin has)."""
+    try:
+        last, hi, lo = float(t["lastPrice"]), float(t["highPrice"]), float(t["lowPrice"])
+        if 0.97 < last < 1.03 and lo > 0 and hi / lo < 1.01:
+            return True
+    except (KeyError, ValueError):
+        pass
+    return base.endswith("B") and listed is not None and base + "BTC" not in listed
+
+
+def auto_watchlist(quote, top=15, tickers=None, tradable=None, listed=None):
+    """The `top` most traded coins against `quote` on the REAL market (testnet volume is fake),
+    kept only if they can be traded where the bot trades. Stablecoins and leveraged tokens out."""
+    if tickers is None:
+        tickers = _cache("ticker24h-real.json", lambda: ticker_24h(c.PUBLIC_DATA_API), max_age_h=6)
+    if tradable is None:
+        tradable = set(trading_symbols(quote))
+    if listed is None:
+        listed = _cache("listed-real.json", lambda: sorted(
+            s["symbol"] for s in c.http("GET", c.PUBLIC_DATA_API + "/api/v3/exchangeInfo",
+                                         {"symbolStatus": "TRADING", "permissions": "SPOT"}, timeout=60)["symbols"]))
+        listed = set(listed)
+    ranked = []
+    for t in tickers:
+        sym = t["symbol"]
+        if not sym.endswith(quote) or sym not in tradable:
+            continue
+        base = sym[: -len(quote)]
+        if base in c.STABLES or any(base.endswith(x) and base != x for x in LEVERAGED):
+            continue
+        if _not_crypto(t, base, listed):
+            continue
+        ranked.append((float(t["quoteVolume"]), sym))
+    ranked.sort(reverse=True)
+    return [s for _, s in ranked[:top]]
 
 
 def _cache(name, fetch, max_age_h=24):

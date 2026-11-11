@@ -56,9 +56,14 @@ def scan(args, cfg):
     setups = [S.norm(s) for s in (args.setup.split(",") if args.setup else S.SETUPS)]
     if args.min_volume is None:
         args.min_volume = cfg["min_volume_24h"]
-    if not args.symbols and cfg.get("watchlist"):
+    auto = not args.symbols and cfg.get("watchlist") == "auto"
+    if not args.symbols and cfg.get("watchlist") and not auto:
         args.symbols = ",".join(cfg["watchlist"])
-    if args.symbols:
+    if auto:
+        symbols = data.auto_watchlist(quote, int(cfg.get("auto_top", 15)))
+        print("Lista automatica: as %d mais negociadas no mercado real que existem em %s: %s" % (
+            len(symbols), cfg["env"], ", ".join(s[:-len(quote)] for s in symbols)))
+    elif args.symbols:
         symbols = [s.strip().upper() for s in args.symbols.split(",")]
         symbols = [s if s.endswith(quote) else s + quote for s in symbols]
     else:

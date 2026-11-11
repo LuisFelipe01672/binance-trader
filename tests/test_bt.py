@@ -95,6 +95,23 @@ class TestBasics(unittest.TestCase):
         self.assertTrue(r["oto"] and r["oco"])
 
 
+class TestAutoWatchlist(unittest.TestCase):
+    def test_most_traded_tradable_no_stables_no_leveraged(self):
+        tk = [{"symbol": s, "quoteVolume": v} for s, v in (
+            ("BTCUSDT", "9e9"), ("USDCUSDT", "8e9"), ("ETHUSDT", "5e9"), ("BTCUPUSDT", "4e9"),
+            ("NVDABUSDT", "3.5e9"), ("NEWUSDT", "3.2e9"), ("BNBUSDT", "3.1e9"),
+            ("SOLUSDT", "3e9"), ("PEPEUSDT", "2e9"), ("XRPUSDT", "1e9"), ("ETHBTC", "9e10"))]
+        for t in tk:
+            t.update(lastPrice="10", highPrice="11", lowPrice="9")
+        next(t for t in tk if t["symbol"] == "NEWUSDT").update(
+            lastPrice="1.0001", highPrice="1.001", lowPrice="0.999")                # a stablecoin
+        tradable = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BTCUPUSDT", "USDCUSDT", "NVDABUSDT",
+                    "NEWUSDT", "BNBUSDT"}                                           # no PEPE on testnet
+        listed = tradable | {"ETHBTC", "BNBBTC", "SOLBTC"}                            # NVDAB has no BTC pair
+        got = data.auto_watchlist("USDT", 4, tickers=tk, tradable=tradable, listed=listed)
+        self.assertEqual(got, ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"])
+
+
 class TestSetupsAndSim(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

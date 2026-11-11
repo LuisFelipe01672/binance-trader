@@ -22,7 +22,8 @@ ENV_URLS = {
 }
 UA = "binance-trader-skill/1.0"
 BRT = timezone(timedelta(hours=-3), "BRT")           # Brazil has no DST since 2019
-STABLES = {"USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI", "USDP", "EUR", "BRL", "USD1"}
+STABLES = {"USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI", "USDP", "EUR", "BRL", "USD1", "RLUSD", "USDE",
+           "PYUSD", "XUSD", "EURI", "AEUR", "USDS", "FRAX", "BFUSD", "PAXG", "XAUT"}
 
 DEFAULT_CONFIG = {
     "quote": "BRL",                  # pairs quoted in reais: BTCBRL, ETHBRL...
@@ -47,7 +48,8 @@ DEFAULT_CONFIG = {
     "allow_live": False,             # must be true (plus two more locks) for prod
     "approval_minutes": 15,          # a "sim" is valid this long
     "market_data": "auto",           # auto: testnet/demo read prices from their own market
-    "watchlist": [],                 # e.g. ["BTC", "ETH", "SOL"]; empty = every pair in the quote
+    "watchlist": [],                 # ["BTC", "ETH"...], "auto" (most traded), or empty = every pair
+    "auto_top": 15,                  # how many coins the "auto" watchlist keeps
     "min_volume_24h": 500000,        # scan skips pairs with less volume (quote asset)
     "entry_timeout_min": 60,         # bot cancels an entry order not filled by then
     "bot_skip_no_edge": True,        # bot does not propose trades the simulation calls SEM VANTAGEM
