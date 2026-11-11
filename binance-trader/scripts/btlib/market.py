@@ -9,7 +9,9 @@ from . import sim as SIM
 # ---------------------------------------------------------------- regime
 def regime(args, cfg):
     """Market weather from BTCUSDT daily candles: is it a day to buy dips or to sit out?"""
-    bars = data.klines("BTCUSDT", "1d", 260, offline=args.offline, end=c.now(args.now) if args.now else None)
+    # always the real market: testnet only keeps a few weeks of history, and the weather is the same
+    bars = data.klines("BTCUSDT", "1d", 260, offline=args.offline, end=c.now(args.now) if args.now else None,
+                       base=c.PUBLIC_DATA_API)
     if len(bars) < 200:
         raise SystemExit("poucos dados diarios do BTC (%d)" % len(bars))
     cl = [b["c"] for b in bars]

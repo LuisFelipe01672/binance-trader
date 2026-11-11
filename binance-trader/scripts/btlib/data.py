@@ -15,7 +15,7 @@ def _bar(k):
             "c": float(k[4]), "v": float(k[5]), "ct": int(k[6]), "qv": float(k[7])}
 
 
-def klines(symbol, interval="15m", bars=500, end=None, offline=None, closed_only=True, now_ms=None):
+def klines(symbol, interval="15m", bars=500, end=None, offline=None, closed_only=True, now_ms=None, base=None):
     """Candles oldest -> newest as dicts {t,o,h,l,c,v,ct,qv}.
 
     end: datetime; only bars that opened before it. closed_only drops a bar still forming.
@@ -36,7 +36,7 @@ def klines(symbol, interval="15m", bars=500, end=None, offline=None, closed_only
             p = {"symbol": symbol.upper(), "interval": interval, "limit": 1000}
             if cursor:
                 p["endTime"] = cursor
-            chunk = c.http("GET", c.DATA_API + "/api/v3/klines", p)
+            chunk = c.http("GET", (base or c.DATA_API) + "/api/v3/klines", p)
             if not chunk:
                 break
             out = [_bar(k) for k in chunk] + out
