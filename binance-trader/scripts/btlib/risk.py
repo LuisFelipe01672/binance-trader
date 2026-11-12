@@ -16,7 +16,8 @@ def _day_start(now):
 
 
 def account_state(cfg, now):
-    trades = J.load()["trades"]
+    # only this account: testnet results must never count against real-money limits (and vice versa)
+    trades = [t for t in J.load()["trades"] if t.get("env", cfg["env"]) == cfg["env"]]
     day0 = _day_start(now)
     week0 = day0 - timedelta(days=day0.weekday())
     closed = [t for t in trades if t.get("closed")]

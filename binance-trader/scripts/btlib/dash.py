@@ -73,7 +73,7 @@ def render(cfg, bot_state, now=None, price=None):
     now = now or c.now()
     q = cfg["quote"]
     price = price or (lambda s: data.price(s))
-    trades = J.load()["trades"]
+    trades = [t for t in J.load()["trades"] if t.get("env", cfg["env"]) == cfg["env"]]
     rs = real_stats(trades, now)
     ghosts = G.load()["ghosts"]
     gs = G.stats(ghosts)
@@ -218,7 +218,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 24px}
 def summary_text(cfg, now, bot_state=None):
     q = cfg["quote"]
     day0 = now.astimezone(c.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
-    rs = real_stats(J.load()["trades"], now)
+    rs = real_stats([t for t in J.load()["trades"] if t.get("env", cfg["env"]) == cfg["env"]], now)
     ghosts = G.load()["ghosts"]
     today = [g for g in ghosts if c.from_ms(g["signal_time"]) >= day0]
     resolved_today = [g for g in ghosts if g.get("resolved") and c.from_ms(g["resolved"]) >= day0

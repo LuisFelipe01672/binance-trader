@@ -606,8 +606,8 @@ def cmd_setup():
     keep = lambda k, v: v or os.environ.get(k, "")
     print("(Enter vazio mantem o que ja estava salvo.)")
     vals["TELEGRAM_BOT_TOKEN"] = keep("TELEGRAM_BOT_TOKEN", clean(getpass.getpass("Token do bot (do @BotFather): ")))
-    vals["BINANCE_API_KEY"] = keep("BINANCE_API_KEY", clean(getpass.getpass("API Key da Binance (testnet): ")))
-    vals["BINANCE_SECRET_KEY"] = keep("BINANCE_SECRET_KEY", clean(getpass.getpass("Secret Key da Binance (testnet): ")))
+    vals["BINANCE_API_KEY"] = keep("BINANCE_API_KEY", clean(getpass.getpass("API Key da Binance: ")))
+    vals["BINANCE_SECRET_KEY"] = keep("BINANCE_SECRET_KEY", clean(getpass.getpass("Secret Key da Binance: ")))
     for k in SECRET_KEYS:
         os.environ[k] = vals[k]
     save_secrets(vals)

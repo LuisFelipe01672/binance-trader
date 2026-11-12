@@ -266,6 +266,18 @@ class TestPipeline(Home):
         self.assertIn("perdas seguidas", text)
         self.assertIn("perda ha 10 min", text)
 
+    def test_testnet_losses_do_not_count_on_the_real_account(self):
+        o = self.plan_and_size(env="prod")
+        cfg = c.load_config()
+        now = c.now("2026-11-08 15:00")
+        J.save({"trades": [{"id": k, "symbol": "BTCUSDT", "base": "BTC", "quote": "USDT", "env": "testnet",
+                            "opened": c.ms(now) - 3600000, "closed": c.ms(now) - 600000, "qty": "0.001",
+                            "sell_qty": "0.001", "entry": "1", "stop": "1", "target": "1", "max_loss": 50,
+                            "pnl": -50.0, "r": -1.0} for k in (1, 2, 3)]})
+        st = risk.account_state(cfg, now)
+        self.assertEqual((st["opened_today"], st["pnl_day"], st["streak"]), (0, 0, 0))
+        self.assertEqual(risk.check_order(o, cfg, st, now, None, None, None)[0], "PASS")
+
     def test_daily_limit_counts_open_risk(self):
         o = self.plan_and_size(daily_loss_limit=10)
         cfg = c.load_config()
