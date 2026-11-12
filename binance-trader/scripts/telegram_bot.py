@@ -570,8 +570,9 @@ def ensure_config():
 BINANCE_ERRORS = {
     -1022: "assinatura invalida: a Secret Key esta errada (copiada incompleta, com espaco, ou e a API Key no lugar).",
     -2014: "API Key em formato invalido: copie a API Key de novo, inteira.",
-    -2015: "API Key nao reconhecida: confira se e uma chave da TESTNET (testnet.binance.vision), "
-           "e nao da Binance de verdade, e se nao foi apagada.",
+    -2015: "API Key, IP ou permissao recusados: confira (1) se a chave e do ambiente certo (testnet x conta real), "
+           "(2) se o celular esta na rede cujo IP foi cadastrado na chave (rode check para ver o IP de agora) e "
+           "(3) se o trading Spot esta ativado na chave.",
     -1021: "relogio do celular fora de hora: ative data e hora automaticas nas configuracoes.",
     -2008: "API Key nao existe nesta conta: gere uma nova na testnet.",
 }
@@ -616,10 +617,28 @@ def cmd_setup():
     cmd_check()
 
 
+def public_ips(http=None):
+    """The address(es) this device shows to the internet, as Binance sees them."""
+    http = http or c.http
+    ips = []
+    for url in ("https://api.ipify.org?format=json", "https://api64.ipify.org?format=json"):
+        try:
+            ip = http("GET", url, timeout=10, retries=0)["ip"]
+            if ip not in ips:
+                ips.append(ip)
+        except (c.HttpError, KeyError, TypeError):
+            pass
+    return ips
+
+
 def cmd_check():
     load_secrets()
     cfg = c.load_config()
     print("Conta: %s (%s)" % (cfg["env"], c.ENV_URLS[cfg["env"]]))
+    ips = public_ips()
+    print("IP deste celular agora: %s" % (" e ".join(ips) if ips else "nao consegui descobrir"))
+    if len(ips) > 1:
+        print("  (a rede usa os dois tipos de endereco: cadastre OS DOIS na chave da Binance)")
     tok = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not tok:
         print("FALTA o token do Telegram: rode setup")
