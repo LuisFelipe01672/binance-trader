@@ -631,6 +631,40 @@ def public_ips(http=None):
     return ips
 
 
+def fmt_qty(x):
+    return ("%.8f" % x).rstrip("0").rstrip(".")
+
+
+def prod_checks(cfg, spot_quote, http=None):
+    """Real account only: what the KEY may do (not the account), and money left in Funding."""
+    out = []
+    try:
+        r = broker.signed("GET", "prod", "/sapi/v1/account/apiRestrictions", {}, http=http)
+        out.append("Permissoes da chave: saque %s, trading Spot %s, restricao de IP %s" % (
+            "LIGADO" if r.get("enableWithdrawals") else "desligado",
+            "ligado" if r.get("enableSpotAndMarginTrading") else "DESLIGADO",
+            "ligada" if r.get("ipRestrict") else "DESLIGADA"))
+        if r.get("enableWithdrawals"):
+            out.append("ATENCAO: esta CHAVE pode sacar. Desmarque 'Habilitar Saques' na chave da Binance.")
+        if not r.get("enableSpotAndMarginTrading"):
+            out.append("ATENCAO: o trading Spot esta desligado na chave: o bot nao conseguira comprar.")
+    except c.HttpError as e:
+        out.append("Nao consegui ler as permissoes da chave: %s" % explain(e))
+    try:
+        fund = broker.signed("POST", "prod", "/sapi/v1/asset/get-funding-asset", {}, http=http)
+        money = {f["asset"]: float(f["free"]) for f in fund or [] if float(f["free"]) > 0}
+        if money:
+            out.append("Carteira Financiamento (Funding): %s" % ", ".join(
+                "%s %s" % (k, fmt_qty(v)) for k, v in money.items()))
+            if money.get(cfg["quote"], 0) > 0 and spot_quote < 10:
+                out.append("-> Seus %s %s estao na Financiamento. O bot so opera a Spot: no app da Binance, "
+                           "Carteiras -> Financiamento -> Transferir -> para Spot." % (
+                               fmt_qty(money[cfg["quote"]]), cfg["quote"]))
+    except c.HttpError as e:
+        out.append("Nao consegui ler a carteira Financiamento: %s" % explain(e))
+    return out
+
+
 def cmd_check():
     load_secrets()
     cfg = c.load_config()
@@ -655,9 +689,15 @@ def cmd_check():
     try:
         acct = account(cfg)
         bal = {b["asset"]: float(b["free"]) for b in acct.get("balances", [])}
-        print("Binance OK. Saldo %s: %s" % (cfg["quote"], bal.get(cfg["quote"], 0)))
-        if acct.get("canWithdraw") and cfg["env"] == "prod":
-            print("ATENCAO: esta chave pode SACAR. Crie uma chave sem permissao de saque.")
+        print("Binance OK. Saldo %s na carteira Spot (a que opera): %s" % (cfg["quote"], bal.get(cfg["quote"], 0)))
+        others = ["%s %s" % (b["asset"], fmt_qty(float(b["free"]) + float(b["locked"])))
+                  for b in acct.get("balances", []) if b["asset"] != cfg["quote"]
+                  and float(b["free"]) + float(b["locked"]) > 0]
+        if others:
+            print("  outros saldos na Spot: %s" % ", ".join(others))
+        if cfg["env"] == "prod":
+            for line in prod_checks(cfg, bal.get(cfg["quote"], 0)):
+                print(line)
     except c.HttpError as e:
         print("Binance FALHOU: %s" % explain(e))
     except SystemExit as e:
